@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+output/
+.spotify_cache
+.env
+browser.json
+oauth.json
