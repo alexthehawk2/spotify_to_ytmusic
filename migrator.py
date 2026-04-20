@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
 from pathlib import Path
 import re
 import time
@@ -16,6 +17,7 @@ SEARCH_TYPES = ("songs", "videos")
 SPOTIFY_PAGE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 PLAYLIST_ADD_BATCH_SIZE = 25
 DEFAULT_BROWSER_AUTH_PATH = Path(__file__).resolve().with_name("browser.json")
+OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "output"))
 
 @dataclass
 class SourceTrack:
@@ -56,6 +58,24 @@ def normalize_text(text: str) -> str:
 
 def clean_query_component(text: str) -> str:
     return normalize_text(text).replace(" ", " ")
+
+def runtime_browser_auth_path() -> Path | None:
+    browser_auth_json = os.getenv("BROWSER_AUTH_JSON", "").strip()
+    if browser_auth_json:
+        runtime_dir = Path(os.getenv("RUNTIME_AUTH_DIR", "/tmp"))
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        runtime_path = runtime_dir / "browser.azure.json"
+        runtime_path.write_text(browser_auth_json, encoding="utf-8")
+        return runtime_path
+
+    if DEFAULT_BROWSER_AUTH_PATH.exists():
+        return DEFAULT_BROWSER_AUTH_PATH
+
+    return None
+
+def slugify_filename(value: str) -> str:
+    safe = re.sub(r"[^a-zA-Z0-9._-]+", "_", value).strip("._")
+    return safe or "migration"
 
 async def spotify_session() -> httpx.AsyncClient:
     return httpx.AsyncClient(
@@ -502,7 +522,7 @@ class PlaylistMigrator:
         from ytmusicapi.auth.oauth import OAuthCredentials
         oauth_creds = None
         normalized_yt_auth = yt_auth
-        browser_auth_path = DEFAULT_BROWSER_AUTH_PATH if DEFAULT_BROWSER_AUTH_PATH.exists() else None
+        browser_auth_path = runtime_browser_auth_path()
         using_browser_auth = bool(browser_auth_path)
         if browser_auth_path:
             self.ytmusic = YTMusic(str(browser_auth_path))
@@ -719,4 +739,9 @@ class PlaylistMigrator:
             "yt_playlist_url": f"https://music.youtube.com/playlist?list={yt_playlist_id}",
         }
         self.status = "completed"
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        summary_filename = slugify_filename(f"{playlist_meta['name']}_{self.playlist_id}_summary") + ".json"
+        summary_path = OUTPUT_DIR / summary_filename
+        summary_path.write_text(json.dumps(self.summary, indent=2), encoding="utf-8")
+        self.log(f"Wrote summary to {summary_path}")
         self.log("Migration completed successfully.")

@@ -1,22 +1,27 @@
-# Use the official Playwright Python image which comes with all browser dependencies
-FROM mcr.microsoft.com/playwright/python:v1.47.0-jammy
+FROM node:20-bookworm-slim AS frontend-builder
 
-# Set working directory
+WORKDIR /frontend
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend/ ./
+RUN npm run build
+
+FROM mcr.microsoft.com/playwright/python:v1.54.0-jammy
+
 WORKDIR /app
 
-# Copy requirements and install
-COPY requirements.txt .
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    FRONTEND_DIST_DIR=/app/frontend/out
+
+COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install only Chromium for Playwright to save space/RAM
-RUN playwright install chromium
+COPY . ./
+COPY --from=frontend-builder /frontend/out ./frontend/out
 
-# Copy the rest of the application
-COPY . .
-
-# Expose the port FastAPI runs on
 EXPOSE 8000
 
-# Command to run the application
-# We use --host 0.0.0.0 for Azure
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]

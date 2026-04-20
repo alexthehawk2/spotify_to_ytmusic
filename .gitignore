@@ -9,3 +9,4 @@ oauth.json
 *.err.log
 frontend/.next/
 frontend/node_modules/
+frontend/out/

@@ -1,0 +1,15 @@
+.git
+.gitignore
+.venv
+__pycache__
+output
+.env
+browser.json
+oauth.json
+backend.log
+backend.err.log
+frontend.log
+frontend.err.log
+frontend/.next
+frontend/node_modules
+frontend/out

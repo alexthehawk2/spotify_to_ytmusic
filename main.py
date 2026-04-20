@@ -1,10 +1,12 @@
 import asyncio
 import uuid
 import os
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -27,6 +29,7 @@ app.add_middleware(
 # In-memory storage for jobs and auth sessions
 jobs: Dict[str, PlaylistMigrator] = {}
 auth_sessions: Dict[str, Dict[str, Any]] = {}
+FRONTEND_DIST_DIR = Path(os.getenv("FRONTEND_DIST_DIR", "frontend/out"))
 
 # Default Google OAuth Client ID/Secret for YT Music (Android client)
 # Users should ideally provide their own via environment variables
@@ -139,6 +142,13 @@ async def get_job(job_id: str):
         "missing_count": len(migrator.missing_tracks),
     }
 
+@app.get("/healthz")
+async def healthz():
+    return {"status": "ok"}
+
+if FRONTEND_DIST_DIR.exists():
+    app.mount("/", StaticFiles(directory=FRONTEND_DIST_DIR, html=True), name="frontend")
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
