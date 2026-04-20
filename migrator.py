@@ -572,16 +572,20 @@ class PlaylistMigrator:
                     client_id = yt_auth_copy.pop("client_id", None)
                     client_secret = yt_auth_copy.pop("client_secret", None)
                     
+                    # ytmusicapi RefreshingToken expects specific keys. Filter out unexpected ones like refresh_token_expires_in
+                    allowed_keys = {"access_token", "refresh_token", "scope", "token_type", "expires_in", "expires_at"}
+                    filtered_auth = {k: v for k, v in yt_auth_copy.items() if k in allowed_keys}
+                    
                     if client_id and client_secret:
                         from ytmusicapi.auth.oauth.credentials import OAuthCredentials
                         oauth_credentials = OAuthCredentials(
                             client_id=client_id,
                             client_secret=client_secret
                         )
-                        auth_data = json.dumps(yt_auth_copy)
+                        auth_data = json.dumps(filtered_auth)
                         self.ytmusic = YTMusic(auth_data, oauth_credentials=oauth_credentials)
                     else:
-                        auth_data = json.dumps(self.yt_auth)
+                        auth_data = json.dumps(filtered_auth)
                         self.ytmusic = YTMusic(auth_data)
                 else:
                     self.ytmusic = YTMusic(self.yt_auth)
