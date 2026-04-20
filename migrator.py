@@ -564,34 +564,60 @@ class PlaylistMigrator:
 
         self.playlist_id = extract_playlist_id(spotify_playlist_url)
 
-        # Resolve browser auth path using priority chain:
-        # 1. BROWSER_AUTH_JSON env var
-        # 2. /secrets/browser-json (Azure volume mount)
-        # 3. /app/browser.json (baked into Docker image)
-        browser_auth_path = runtime_browser_auth_path() or DEFAULT_BROWSER_AUTH_PATH
-
-        if browser_auth_path.exists():
-            self.log(f"Using browser auth from: {browser_auth_path}")
-            self.log(f"File size: {browser_auth_path.stat().st_size} bytes")
+        if self.yt_auth:
+            self.log("Using provided yt_auth (OAuth or custom).")
             try:
-                self.ytmusic = YTMusic(str(browser_auth_path))
-                self.log("YTMusic initialized successfully with browser auth.")
+                if isinstance(self.yt_auth, dict):
+                    yt_auth_copy = self.yt_auth.copy()
+                    client_id = yt_auth_copy.pop("client_id", None)
+                    client_secret = yt_auth_copy.pop("client_secret", None)
+                    
+                    if client_id and client_secret:
+                        from ytmusicapi.auth.oauth.credentials import OAuthCredentials
+                        oauth_credentials = OAuthCredentials(
+                            client_id=client_id,
+                            client_secret=client_secret
+                        )
+                        auth_data = json.dumps(yt_auth_copy)
+                        self.ytmusic = YTMusic(auth_data, oauth_credentials=oauth_credentials)
+                    else:
+                        auth_data = json.dumps(self.yt_auth)
+                        self.ytmusic = YTMusic(auth_data)
+                else:
+                    self.ytmusic = YTMusic(self.yt_auth)
+                self.log("YTMusic initialized successfully with provided yt_auth.")
             except Exception as e:
-                self.log(f"ERROR: Failed to initialize YTMusic with {browser_auth_path}: {e}")
-                self.log(f"File contents preview: {browser_auth_path.read_text(encoding='utf-8')[:300]}")
-                raise RuntimeError(f"browser.json found but failed to load: {e}") from e
+                self.log(f"ERROR: Failed to initialize YTMusic with provided yt_auth: {e}")
+                raise RuntimeError(f"yt_auth provided but failed to load: {e}") from e
         else:
-            self.log(f"ERROR: No browser.json found at {browser_auth_path}")
-            self.log(
-                f"Files in /secrets: {list(Path('/secrets').iterdir()) if Path('/secrets').exists() else 'directory missing'}"
-            )
-            self.log(
-                f"Files in /app: {[f.name for f in Path('/app').iterdir() if f.suffix == '.json']}"
-            )
-            raise RuntimeError(
-                "No browser.json found. Ensure it is either baked into the Docker image, "
-                "mounted via Azure secret volume, or provided via BROWSER_AUTH_JSON env var."
-            )
+            # Resolve browser auth path using priority chain:
+            # 1. BROWSER_AUTH_JSON env var
+            # 2. /secrets/browser-json (Azure volume mount)
+            # 3. /app/browser.json (baked into Docker image)
+            browser_auth_path = runtime_browser_auth_path() or DEFAULT_BROWSER_AUTH_PATH
+    
+            if browser_auth_path.exists():
+                self.log(f"Using browser auth from: {browser_auth_path}")
+                self.log(f"File size: {browser_auth_path.stat().st_size} bytes")
+                try:
+                    self.ytmusic = YTMusic(str(browser_auth_path))
+                    self.log("YTMusic initialized successfully with browser auth.")
+                except Exception as e:
+                    self.log(f"ERROR: Failed to initialize YTMusic with {browser_auth_path}: {e}")
+                    self.log(f"File contents preview: {browser_auth_path.read_text(encoding='utf-8')[:300]}")
+                    raise RuntimeError(f"browser.json found but failed to load: {e}") from e
+            else:
+                self.log(f"ERROR: No browser.json found at {browser_auth_path}")
+                self.log(
+                    f"Files in /secrets: {list(Path('/secrets').iterdir()) if Path('/secrets').exists() else 'directory missing'}"
+                )
+                self.log(
+                    f"Files in /app: {[f.name for f in Path('/app').iterdir() if f.suffix == '.json']}"
+                )
+                raise RuntimeError(
+                    "No browser.json found. Ensure it is either baked into the Docker image, "
+                    "mounted via Azure secret volume, or provided via BROWSER_AUTH_JSON env var."
+                )
 
         try:
             self.search_ytmusic = YTMusic()
