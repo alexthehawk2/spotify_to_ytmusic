@@ -1,3 +1,6 @@
 ytmusicapi==1.10.3
 requests==2.33.1
 playwright==1.54.0
+fastapi[standard]
+uvicorn
+python-dotenv==1.0.1

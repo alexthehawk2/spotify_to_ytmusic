@@ -5,3 +5,7 @@ output/
 .env
 browser.json
 oauth.json
+*.log
+*.err.log
+frontend/.next/
+frontend/node_modules/
