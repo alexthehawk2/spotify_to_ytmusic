@@ -60,17 +60,59 @@ def clean_query_component(text: str) -> str:
     return normalize_text(text).replace(" ", " ")
 
 def runtime_browser_auth_path() -> Path | None:
-    browser_auth_json = os.getenv("BROWSER_AUTH_JSON", "").strip()
-    if browser_auth_json:
-        runtime_dir = Path(os.getenv("RUNTIME_AUTH_DIR", "/tmp"))
-        runtime_dir.mkdir(parents=True, exist_ok=True)
-        runtime_path = runtime_dir / "browser.azure.json"
-        runtime_path.write_text(browser_auth_json, encoding="utf-8")
-        return runtime_path
+    """
+    Priority order:
+    1. BROWSER_AUTH_JSON env var (base64 OR raw JSON) — writes to /tmp/browser.azure.json
+    2. /secrets/browser-json — Azure volume mount
+    3. DEFAULT_BROWSER_AUTH_PATH — browser.json baked into the image at /app/browser.json
+    """
 
+    browser_auth_env = os.getenv("BROWSER_AUTH_JSON", "").strip()
+
+    if browser_auth_env:
+        try:
+            decoded_json = None
+
+            # Try base64 decode first
+            try:
+                decoded_bytes = base64.b64decode(browser_auth_env)
+                decoded_str = decoded_bytes.decode("utf-8")
+
+                # Validate decoded JSON
+                json.loads(decoded_str)
+                decoded_json = decoded_str
+                print("DEBUG: Loaded browser auth from base64 env var")
+
+            except Exception:
+                # Fallback: assume raw JSON
+                json.loads(browser_auth_env)
+                decoded_json = browser_auth_env
+                print("DEBUG: Loaded browser auth from raw JSON env var")
+
+            runtime_dir = Path(os.getenv("RUNTIME_AUTH_DIR", "/tmp"))
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+
+            runtime_path = runtime_dir / "browser.azure.json"
+            runtime_path.write_text(decoded_json, encoding="utf-8")
+
+            print(f"DEBUG: Created runtime auth file at {runtime_path}")
+            return runtime_path
+
+        except Exception as e:
+            print(f"DEBUG: Failed to process BROWSER_AUTH_JSON env var: {e}")
+
+    # 2. Try Azure volume-mounted secret
+    azure_mount_path = Path("/secrets/browser-json")
+    if azure_mount_path.exists() and azure_mount_path.stat().st_size > 0:
+        print(f"DEBUG: Found Azure-mounted browser auth at {azure_mount_path}")
+        return azure_mount_path
+
+    # 3. Try default path (baked into image)
     if DEFAULT_BROWSER_AUTH_PATH.exists():
+        print(f"DEBUG: Found default browser auth at {DEFAULT_BROWSER_AUTH_PATH}")
         return DEFAULT_BROWSER_AUTH_PATH
 
+    print("DEBUG: No browser.json found in env, Azure mount, or disk.")
     return None
 
 def slugify_filename(value: str) -> str:
@@ -91,22 +133,18 @@ async def fetch_public_playlist_page(client: httpx.AsyncClient, playlist_id: str
     url = f"https://open.spotify.com/playlist/{playlist_id}"
     response = await client.get(url)
     response.raise_for_status()
-    # Log the length and a bit of the content for debugging
     print(f"Fetched {len(response.text)} bytes from {url}")
     return response.text
 
 def decode_initial_state(html: str) -> dict[str, Any]:
-    # Spotify uses both initialState and initial-state IDs
     match = re.search(r'<script id="(?:initialState|initial-state)" type="text/plain">(.*?)</script>', html, re.S)
     if not match:
         raise RuntimeError("Spotify public page did not include the expected initialState payload.")
     
     content = match.group(1).strip()
     try:
-        # Try to decode as base64 first
         return json.loads(base64.b64decode(content))
     except Exception:
-        # If base64 fails, it might be raw JSON
         try:
             return json.loads(content)
         except Exception as exc:
@@ -516,47 +554,49 @@ class PlaylistMigrator:
         self.spotify_headless = spotify_headless
         self.spotify_scroll_timeout = spotify_scroll_timeout
 
-        self.playlist_id = extract_playlist_id(spotify_playlist_url)
-        
-        # Handle OAuth authentication from a dictionary
-        from ytmusicapi.auth.oauth import OAuthCredentials
-        oauth_creds = None
-        normalized_yt_auth = yt_auth
-        browser_auth_path = runtime_browser_auth_path()
-        using_browser_auth = bool(browser_auth_path)
-        if browser_auth_path:
-            self.ytmusic = YTMusic(str(browser_auth_path))
-        else:
-            if isinstance(yt_auth, dict):
-                if "client_id" in yt_auth and "client_secret" in yt_auth:
-                    oauth_creds = OAuthCredentials(yt_auth["client_id"], yt_auth["client_secret"])
-
-                allowed_token_fields = {
-                    "scope",
-                    "token_type",
-                    "access_token",
-                    "refresh_token",
-                    "expires_at",
-                    "expires_in",
-                }
-                normalized_yt_auth = {
-                    key: value
-                    for key, value in yt_auth.items()
-                    if key in allowed_token_fields
-                }
-
-            self.ytmusic = YTMusic(auth=normalized_yt_auth, oauth_credentials=oauth_creds)
-        self.search_ytmusic = YTMusic()
-
-        self.tracks: list[SourceTrack] = []
-        self.matched_tracks: list[dict[str, Any]] = []
-        self.missing_tracks: list[dict[str, Any]] = []
-        self.summary: dict[str, Any] = {}
+        self.tracks = []
+        self.matched_tracks = []
+        self.missing_tracks = []
+        self.summary = {}
         self.status = "idle"
         self.progress = 0.0
-        self.logs: list[str] = []
-        if using_browser_auth and browser_auth_path:
-            self.log(f"Using browser auth from {browser_auth_path.name} for YouTube Music writes.")
+        self.logs = []
+
+        self.playlist_id = extract_playlist_id(spotify_playlist_url)
+
+        # Resolve browser auth path using priority chain:
+        # 1. BROWSER_AUTH_JSON env var
+        # 2. /secrets/browser-json (Azure volume mount)
+        # 3. /app/browser.json (baked into Docker image)
+        browser_auth_path = runtime_browser_auth_path() or DEFAULT_BROWSER_AUTH_PATH
+
+        if browser_auth_path.exists():
+            self.log(f"Using browser auth from: {browser_auth_path}")
+            self.log(f"File size: {browser_auth_path.stat().st_size} bytes")
+            try:
+                self.ytmusic = YTMusic(str(browser_auth_path))
+                self.log("YTMusic initialized successfully with browser auth.")
+            except Exception as e:
+                self.log(f"ERROR: Failed to initialize YTMusic with {browser_auth_path}: {e}")
+                self.log(f"File contents preview: {browser_auth_path.read_text(encoding='utf-8')[:300]}")
+                raise RuntimeError(f"browser.json found but failed to load: {e}") from e
+        else:
+            self.log(f"ERROR: No browser.json found at {browser_auth_path}")
+            self.log(
+                f"Files in /secrets: {list(Path('/secrets').iterdir()) if Path('/secrets').exists() else 'directory missing'}"
+            )
+            self.log(
+                f"Files in /app: {[f.name for f in Path('/app').iterdir() if f.suffix == '.json']}"
+            )
+            raise RuntimeError(
+                "No browser.json found. Ensure it is either baked into the Docker image, "
+                "mounted via Azure secret volume, or provided via BROWSER_AUTH_JSON env var."
+            )
+
+        try:
+            self.search_ytmusic = YTMusic()
+        except Exception:
+            self.search_ytmusic = self.ytmusic
 
     def log(self, message: str):
         print(message)
@@ -609,7 +649,7 @@ class PlaylistMigrator:
         try:
             async with await spotify_session() as client:
                 html = await fetch_public_playlist_page(client, self.playlist_id)
-                if len(html) > 10000: # Simple heuristic for "real" page
+                if len(html) > 10000:
                     playlist_meta, tracks, total_count, current_market = extract_public_playlist_from_html(html, self.playlist_id)
                 else:
                     self.log("Initial request returned minimal data. Using browser extraction...")
@@ -704,7 +744,7 @@ class PlaylistMigrator:
         playlist_description = self.playlist_description_override or (playlist_meta.get("description") or "")
         privacy_status = "PUBLIC" if self.is_public else "PRIVATE"
 
-        self.log(f"Creating YouTube Music playlist: {playlist_name}")
+        self.log(f"Creating YouTube Music playlist: {playlist_name} (Privacy: {privacy_status})")
         try:
             yt_playlist_id = await asyncio.to_thread(
                 self.ytmusic.create_playlist,
@@ -715,6 +755,12 @@ class PlaylistMigrator:
         except Exception as exc:
             self.status = "failed"
             self.log(f"Failed to create YT Music playlist: {exc}")
+            if hasattr(exc, "response") and exc.response is not None:
+                try:
+                    error_json = exc.response.json()
+                    self.log(f"Detailed API Error: {json.dumps(error_json, indent=2)}")
+                except Exception:
+                    self.log(f"Raw API Error Content: {exc.response.text}")
             raise
 
         self.log(f"Created playlist {yt_playlist_id}. Adding {len(video_ids)} tracks...")

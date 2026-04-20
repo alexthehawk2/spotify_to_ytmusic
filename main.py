@@ -113,18 +113,24 @@ async def run_migration_task(job_id: str):
 
 @app.post("/api/jobs")
 async def create_job(request: MigrationRequest, background_tasks: BackgroundTasks):
-    job_id = str(uuid.uuid4())
-    migrator = PlaylistMigrator(
-        spotify_playlist_url=request.spotify_playlist_url,
-        yt_auth=request.yt_auth,
-        playlist_name_override=request.playlist_name,
-        playlist_description_override=request.playlist_description,
-        is_public=request.is_public,
-        spotify_headless=True,
-    )
-    jobs[job_id] = migrator
-    background_tasks.add_task(run_migration_task, job_id)
-    return {"job_id": job_id}
+    try:
+        job_id = str(uuid.uuid4())
+        migrator = PlaylistMigrator(
+            spotify_playlist_url=request.spotify_playlist_url,
+            yt_auth=request.yt_auth,
+            playlist_name_override=request.playlist_name,
+            playlist_description_override=request.playlist_description,
+            is_public=request.is_public,
+            spotify_headless=True,
+        )
+        jobs[job_id] = migrator
+        background_tasks.add_task(run_migration_task, job_id)
+        return {"job_id": job_id}
+    except Exception as e:
+        import traceback
+        error_detail = f"Failed to initialize migrator: {str(e)}\n{traceback.format_exc()}"
+        print(error_detail)
+        raise HTTPException(status_code=500, detail=error_detail)
 
 @app.get("/api/jobs/{job_id}")
 async def get_job(job_id: str):
