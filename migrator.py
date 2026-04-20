@@ -771,7 +771,12 @@ class PlaylistMigrator:
 
         self.status = "creating_playlist"
         playlist_name = self.playlist_name_override or playlist_meta["name"]
-        playlist_description = self.playlist_description_override or (playlist_meta.get("description") or "")
+        
+        # YouTube Music API sometimes rejects empty descriptions with HTTP 400 when using OAuth.
+        playlist_description = self.playlist_description_override or playlist_meta.get("description")
+        if not playlist_description or not str(playlist_description).strip():
+            playlist_description = "Migrated from Spotify"
+            
         privacy_status = "PUBLIC" if self.is_public else "PRIVATE"
 
         self.log(f"Creating YouTube Music playlist: {playlist_name} (Privacy: {privacy_status})")
