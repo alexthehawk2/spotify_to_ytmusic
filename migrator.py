@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Callable, AsyncGenerator
 
 import httpx
+import requests
 from ytmusicapi import YTMusic
 
 SEARCH_TYPES = ("songs", "videos")
@@ -510,6 +511,7 @@ class PlaylistMigrator:
         if not self.yt_auth:
             raise RuntimeError("yt_auth must be provided. Only OAuth flow is supported.")
 
+        self.log(f"Raw yt_auth token received: {json.dumps(self.yt_auth)}")
         self.log("Using provided yt_auth (OAuth).")
         try:
             if isinstance(self.yt_auth, dict):
@@ -547,6 +549,73 @@ class PlaylistMigrator:
     def log(self, message: str):
         print(message)
         self.logs.append(message)
+
+    async def create_playlist_api(self, title: str, description: str, privacy_status: str) -> str:
+        if not self.yt_auth or not isinstance(self.yt_auth, dict) or "access_token" not in self.yt_auth:
+            raise RuntimeError("OAuth access_token not found for API creation.")
+
+        token = self.yt_auth["access_token"]
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        body = {
+            "snippet": {
+                "title": title,
+                "description": description
+            },
+            "status": {
+                "privacyStatus": privacy_status.lower()
+            }
+        }
+        
+        response = await asyncio.to_thread(
+            requests.post,
+            "https://youtube.googleapis.com/youtube/v3/playlists?part=snippet,status",
+            headers=headers,
+            json=body
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data["id"]
+
+    async def add_playlist_items_api(self, playlist_id: str, video_ids: list[str]) -> tuple[list[str], list[str]]:
+        if not self.yt_auth or not isinstance(self.yt_auth, dict) or "access_token" not in self.yt_auth:
+            raise RuntimeError("OAuth access_token not found for API creation.")
+
+        token = self.yt_auth["access_token"]
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        
+        added_video_ids = []
+        failed_video_ids = []
+        
+        for video_id in video_ids:
+            body = {
+                "snippet": {
+                    "playlistId": playlist_id,
+                    "resourceId": {
+                        "kind": "youtube#video",
+                        "videoId": video_id
+                    }
+                }
+            }
+            try:
+                response = await asyncio.to_thread(
+                    requests.post,
+                    "https://youtube.googleapis.com/youtube/v3/playlistItems?part=snippet",
+                    headers=headers,
+                    json=body
+                )
+                response.raise_for_status()
+                added_video_ids.append(video_id)
+            except Exception as exc:
+                self.log(f"Failed to add video {video_id}: {exc}")
+                failed_video_ids.append(video_id)
+                
+        return added_video_ids, failed_video_ids
 
     async def add_tracks_to_playlist(
         self, playlist_id: str, video_ids: list[str]
@@ -697,8 +766,7 @@ class PlaylistMigrator:
 
         self.log(f"Creating YouTube Music playlist: {playlist_name} (Privacy: {privacy_status})")
         try:
-            yt_playlist_id = await asyncio.to_thread(
-                self.ytmusic.create_playlist,
+            yt_playlist_id = await self.create_playlist_api(
                 title=playlist_name,
                 description=playlist_description,
                 privacy_status=privacy_status,
@@ -715,7 +783,7 @@ class PlaylistMigrator:
             raise
 
         self.log(f"Created playlist {yt_playlist_id}. Adding {len(video_ids)} tracks...")
-        added_video_ids, failed_video_ids = await self.add_tracks_to_playlist(
+        added_video_ids, failed_video_ids = await self.add_playlist_items_api(
             yt_playlist_id,
             video_ids,
         )
