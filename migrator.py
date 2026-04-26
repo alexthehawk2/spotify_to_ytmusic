@@ -16,7 +16,6 @@ from ytmusicapi import YTMusic
 SEARCH_TYPES = ("songs", "videos")
 SPOTIFY_PAGE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 PLAYLIST_ADD_BATCH_SIZE = 25
-DEFAULT_BROWSER_AUTH_PATH = Path(__file__).resolve().with_name("browser.json")
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "output"))
 
 @dataclass
@@ -58,62 +57,6 @@ def normalize_text(text: str) -> str:
 
 def clean_query_component(text: str) -> str:
     return normalize_text(text).replace(" ", " ")
-
-def runtime_browser_auth_path() -> Path | None:
-    """
-    Priority order:
-    1. BROWSER_AUTH_JSON env var (base64 OR raw JSON) — writes to /tmp/browser.azure.json
-    2. /secrets/browser-json — Azure volume mount
-    3. DEFAULT_BROWSER_AUTH_PATH — browser.json baked into the image at /app/browser.json
-    """
-
-    browser_auth_env = os.getenv("BROWSER_AUTH_JSON", "").strip()
-
-    if browser_auth_env:
-        try:
-            decoded_json = None
-
-            # Try base64 decode first
-            try:
-                decoded_bytes = base64.b64decode(browser_auth_env)
-                decoded_str = decoded_bytes.decode("utf-8")
-
-                # Validate decoded JSON
-                json.loads(decoded_str)
-                decoded_json = decoded_str
-                print("DEBUG: Loaded browser auth from base64 env var")
-
-            except Exception:
-                # Fallback: assume raw JSON
-                json.loads(browser_auth_env)
-                decoded_json = browser_auth_env
-                print("DEBUG: Loaded browser auth from raw JSON env var")
-
-            runtime_dir = Path(os.getenv("RUNTIME_AUTH_DIR", "/tmp"))
-            runtime_dir.mkdir(parents=True, exist_ok=True)
-
-            runtime_path = runtime_dir / "browser.azure.json"
-            runtime_path.write_text(decoded_json, encoding="utf-8")
-
-            print(f"DEBUG: Created runtime auth file at {runtime_path}")
-            return runtime_path
-
-        except Exception as e:
-            print(f"DEBUG: Failed to process BROWSER_AUTH_JSON env var: {e}")
-
-    # 2. Try Azure volume-mounted secret
-    azure_mount_path = Path("/secrets/browser-json")
-    if azure_mount_path.exists() and azure_mount_path.stat().st_size > 0:
-        print(f"DEBUG: Found Azure-mounted browser auth at {azure_mount_path}")
-        return azure_mount_path
-
-    # 3. Try default path (baked into image)
-    if DEFAULT_BROWSER_AUTH_PATH.exists():
-        print(f"DEBUG: Found default browser auth at {DEFAULT_BROWSER_AUTH_PATH}")
-        return DEFAULT_BROWSER_AUTH_PATH
-
-    print("DEBUG: No browser.json found in env, Azure mount, or disk.")
-    return None
 
 def slugify_filename(value: str) -> str:
     safe = re.sub(r"[^a-zA-Z0-9._-]+", "_", value).strip("._")
@@ -564,64 +507,37 @@ class PlaylistMigrator:
 
         self.playlist_id = extract_playlist_id(spotify_playlist_url)
 
-        if self.yt_auth:
-            self.log("Using provided yt_auth (OAuth or custom).")
-            try:
-                if isinstance(self.yt_auth, dict):
-                    yt_auth_copy = self.yt_auth.copy()
-                    client_id = yt_auth_copy.pop("client_id", None)
-                    client_secret = yt_auth_copy.pop("client_secret", None)
-                    
-                    # ytmusicapi RefreshingToken expects specific keys. Filter out unexpected ones like refresh_token_expires_in
-                    allowed_keys = {"access_token", "refresh_token", "scope", "token_type", "expires_in", "expires_at"}
-                    filtered_auth = {k: v for k, v in yt_auth_copy.items() if k in allowed_keys}
-                    
-                    if client_id and client_secret:
-                        from ytmusicapi.auth.oauth.credentials import OAuthCredentials
-                        oauth_credentials = OAuthCredentials(
-                            client_id=client_id,
-                            client_secret=client_secret
-                        )
-                        auth_data = json.dumps(filtered_auth)
-                        self.ytmusic = YTMusic(auth_data, oauth_credentials=oauth_credentials)
-                    else:
-                        auth_data = json.dumps(filtered_auth)
-                        self.ytmusic = YTMusic(auth_data)
+        if not self.yt_auth:
+            raise RuntimeError("yt_auth must be provided. Only OAuth flow is supported.")
+
+        self.log("Using provided yt_auth (OAuth).")
+        try:
+            if isinstance(self.yt_auth, dict):
+                yt_auth_copy = self.yt_auth.copy()
+                client_id = yt_auth_copy.pop("client_id", None)
+                client_secret = yt_auth_copy.pop("client_secret", None)
+                
+                # ytmusicapi RefreshingToken expects specific keys. Filter out unexpected ones like refresh_token_expires_in
+                allowed_keys = {"access_token", "refresh_token", "scope", "token_type", "expires_in", "expires_at"}
+                filtered_auth = {k: v for k, v in yt_auth_copy.items() if k in allowed_keys}
+                
+                if client_id and client_secret:
+                    from ytmusicapi.auth.oauth.credentials import OAuthCredentials
+                    oauth_credentials = OAuthCredentials(
+                        client_id=client_id,
+                        client_secret=client_secret
+                    )
+                    auth_data = json.dumps(filtered_auth)
+                    self.ytmusic = YTMusic(auth_data, oauth_credentials=oauth_credentials)
                 else:
-                    self.ytmusic = YTMusic(self.yt_auth)
-                self.log("YTMusic initialized successfully with provided yt_auth.")
-            except Exception as e:
-                self.log(f"ERROR: Failed to initialize YTMusic with provided yt_auth: {e}")
-                raise RuntimeError(f"yt_auth provided but failed to load: {e}") from e
-        else:
-            # Resolve browser auth path using priority chain:
-            # 1. BROWSER_AUTH_JSON env var
-            # 2. /secrets/browser-json (Azure volume mount)
-            # 3. /app/browser.json (baked into Docker image)
-            browser_auth_path = runtime_browser_auth_path() or DEFAULT_BROWSER_AUTH_PATH
-    
-            if browser_auth_path.exists():
-                self.log(f"Using browser auth from: {browser_auth_path}")
-                self.log(f"File size: {browser_auth_path.stat().st_size} bytes")
-                try:
-                    self.ytmusic = YTMusic(str(browser_auth_path))
-                    self.log("YTMusic initialized successfully with browser auth.")
-                except Exception as e:
-                    self.log(f"ERROR: Failed to initialize YTMusic with {browser_auth_path}: {e}")
-                    self.log(f"File contents preview: {browser_auth_path.read_text(encoding='utf-8')[:300]}")
-                    raise RuntimeError(f"browser.json found but failed to load: {e}") from e
+                    auth_data = json.dumps(filtered_auth)
+                    self.ytmusic = YTMusic(auth_data)
             else:
-                self.log(f"ERROR: No browser.json found at {browser_auth_path}")
-                self.log(
-                    f"Files in /secrets: {list(Path('/secrets').iterdir()) if Path('/secrets').exists() else 'directory missing'}"
-                )
-                self.log(
-                    f"Files in /app: {[f.name for f in Path('/app').iterdir() if f.suffix == '.json']}"
-                )
-                raise RuntimeError(
-                    "No browser.json found. Ensure it is either baked into the Docker image, "
-                    "mounted via Azure secret volume, or provided via BROWSER_AUTH_JSON env var."
-                )
+                self.ytmusic = YTMusic(self.yt_auth)
+            self.log("YTMusic initialized successfully with provided yt_auth.")
+        except Exception as e:
+            self.log(f"ERROR: Failed to initialize YTMusic with provided yt_auth: {e}")
+            raise RuntimeError(f"yt_auth provided but failed to load: {e}") from e
 
         try:
             self.search_ytmusic = YTMusic()

@@ -48,8 +48,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--spotify-playlist", required=True, help="Public Spotify playlist URL or ID")
     parser.add_argument(
         "--yt-auth",
-        default="browser.json",
-        help="Path to YTMusic auth JSON created by ytmusicapi browser or oauth setup",
+        required=True,
+        help="Path to YTMusic OAuth JSON created by `ytmusicapi oauth` setup",
     )
     parser.add_argument(
         "--playlist-name",
@@ -571,8 +571,7 @@ def main() -> int:
     if not yt_auth_path.exists():
         print(
             f"YouTube Music auth file not found at {yt_auth_path}. "
-            "Create it with `.venv\\Scripts\\ytmusicapi.exe browser --file browser.json` "
-            "or `.venv\\Scripts\\ytmusicapi.exe oauth --file oauth.json` first.",
+            "Create it with `.venv\\Scripts\\ytmusicapi.exe oauth --file oauth.json` first.",
             file=sys.stderr,
         )
         return 1
