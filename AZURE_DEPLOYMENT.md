@@ -36,7 +36,7 @@ Do not upload `browser.json` to GitHub.
 Example local commands:
 
 ```powershell
-docker build -t spotify-to-ytmusic:latest .
+docker build -t spotify-to-ytmusic:latest.
 ```
 
 Tag and push to your Azure Container Registry:
@@ -62,3 +62,29 @@ Recommended initial settings:
 - Container filesystem is ephemeral unless you attach storage.
 - Long-running or large playlist jobs may be slower on free/consumption resources.
 - If you rely on `BROWSER_AUTH_JSON`, you may need to refresh it when the underlying YouTube cookies expire.
+
+## Deployment Steps
+
+### Build and Push Docker Image
+
+1. Build the Docker image:
+
+```bash
+docker build -t spotify-to-ytmusic.
+```
+
+2. Push the image to GitHub Container Registry (GHCR):
+
+```bash
+docker tag spotify-to-ytmusic ghcr.io/<your-username>/spotify-to-ytmusic:latest
+docker push ghcr.io/<your-username>/spotify-to-ytmusic:latest
+```
+
+### Create a New Revision on Azure
+
+1. Create a new revision on Azure using the Azure CLI:
+
+```bash
+az webapp deployment source config-local-git --name <your-app-name> --resource-group <your-resource-group>
+git remote add azure <azure-git-url>
+git push azure main

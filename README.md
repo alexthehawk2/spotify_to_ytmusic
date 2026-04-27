@@ -20,7 +20,7 @@ It is designed for large playlists like your 600-track case and writes reports f
 Install dependencies:
 
 ```powershell
-python -m venv .venv
+python -m venv.venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
@@ -52,7 +52,7 @@ Save the resulting file in this repo, or pass a different path with `--yt-auth`.
 Dry-run first on a subset:
 
 ```powershell
-python .\spotify_to_ytmusic.py `
+python.\spotify_to_ytmusic.py `
   --spotify-playlist "https://open.spotify.com/playlist/YOUR_PLAYLIST_ID" `
   --limit 25 `
   --dry-run
@@ -61,22 +61,22 @@ python .\spotify_to_ytmusic.py `
 Create the full replica playlist:
 
 ```powershell
-python .\spotify_to_ytmusic.py `
+python.\spotify_to_ytmusic.py `
   --spotify-playlist "https://open.spotify.com/playlist/YOUR_PLAYLIST_ID"
 ```
 
 If you used OAuth auth instead of browser auth:
 
 ```powershell
-python .\spotify_to_ytmusic.py `
+python.\spotify_to_ytmusic.py `
   --spotify-playlist "https://open.spotify.com/playlist/YOUR_PLAYLIST_ID" `
-  --yt-auth .\oauth.json
+  --yt-auth.\oauth.json
 ```
 
 If you need Chrome instead of Edge for Spotify extraction:
 
 ```powershell
-python .\spotify_to_ytmusic.py `
+python.\spotify_to_ytmusic.py `
   --spotify-playlist "https://open.spotify.com/playlist/YOUR_PLAYLIST_ID" `
   --spotify-browser-channel chrome
 ```
@@ -84,7 +84,7 @@ python .\spotify_to_ytmusic.py `
 If you are willing to proceed when at least 95% of the Spotify playlist is extracted:
 
 ```powershell
-python .\spotify_to_ytmusic.py `
+python.\spotify_to_ytmusic.py `
   --spotify-playlist "https://open.spotify.com/playlist/YOUR_PLAYLIST_ID" `
   --min-extraction-rate 0.95
 ```
@@ -92,7 +92,7 @@ python .\spotify_to_ytmusic.py `
 Create it as public and override the name:
 
 ```powershell
-python .\spotify_to_ytmusic.py `
+python.\spotify_to_ytmusic.py `
   --spotify-playlist "https://open.spotify.com/playlist/YOUR_PLAYLIST_ID" `
   --playlist-name "My Spotify Replica" `
   --public
@@ -137,3 +137,29 @@ This is intentionally conservative. Some songs will still require manual review 
 - The script creates a new YouTube Music playlist. It does not update an existing one.
 - Matching is best-effort and may choose alternate uploads, live versions, or videos for some songs.
 - Private or region-locked catalog differences can still leave some tracks unmatched.
+
+## Deployment
+
+### Build and Push Docker Image
+
+1. Build the Docker image:
+
+```bash
+docker build -t spotify-to-ytmusic.
+```
+
+2. Push the image to GitHub Container Registry (GHCR):
+
+```bash
+docker tag spotify-to-ytmusic ghcr.io/<your-username>/spotify-to-ytmusic:latest
+docker push ghcr.io/<your-username>/spotify-to-ytmusic:latest
+```
+
+### Create a New Revision on Azure
+
+1. Create a new revision on Azure using the Azure CLI:
+
+```bash
+az webapp deployment source config-local-git --name <your-app-name> --resource-group <your-resource-group>
+git remote add azure <azure-git-url>
+git push azure main
