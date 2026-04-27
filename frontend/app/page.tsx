@@ -1,7 +1,16 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Music, ArrowRight, Loader2, CheckCircle2, AlertCircle, ExternalLink, Settings, Info } from "lucide-react";
+import {
+  Music,
+  ArrowRight,
+  Loader2,
+  CheckCircle2,
+  AlertCircle,
+  ExternalLink,
+  Settings,
+  Info,
+} from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "";
 
@@ -11,7 +20,7 @@ export default function Home() {
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(true);
-  
+
   const [authInfo, setAuthInfo] = useState<any>(null);
   const [ytAuthToken, setYtAuthToken] = useState<any>(null);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -23,13 +32,13 @@ export default function Home() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/auth/start`, { 
+      const res = await fetch(`${API_BASE}/api/auth/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           client_id: clientId || null,
           client_secret: clientSecret || null,
-        })
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Authentication failed");
@@ -45,19 +54,25 @@ export default function Home() {
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (step === 2 && authInfo?.device_code && !ytAuthToken) {
-      interval = setInterval(async () => {
-        try {
-          const res = await fetch(`${API_BASE}/api/auth/poll/${authInfo.device_code}`, { method: "POST" });
-          const data = await res.json();
-          if (data.status === "success") {
-            setYtAuthToken(data.auth);
-            setStep(3);
-            clearInterval(interval);
+      interval = setInterval(
+        async () => {
+          try {
+            const res = await fetch(
+              `${API_BASE}/api/auth/poll/${authInfo.device_code}`,
+              { method: "POST" },
+            );
+            const data = await res.json();
+            if (data.status === "success") {
+              setYtAuthToken(data.auth);
+              setStep(3);
+              clearInterval(interval);
+            }
+          } catch (err) {
+            console.error("Polling error", err);
           }
-        } catch (err) {
-          console.error("Polling error", err);
-        }
-      }, (authInfo.interval || 5) * 1000);
+        },
+        (authInfo.interval || 5) * 1000,
+      );
     }
     return () => clearInterval(interval);
   }, [step, authInfo, ytAuthToken]);
@@ -90,7 +105,12 @@ export default function Home() {
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
-    if (step === 4 && jobId && jobStatus?.status !== "completed" && jobStatus?.status !== "failed") {
+    if (
+      step === 4 &&
+      jobId &&
+      jobStatus?.status !== "completed" &&
+      jobStatus?.status !== "failed"
+    ) {
       interval = setInterval(async () => {
         try {
           const res = await fetch(`${API_BASE}/api/jobs/${jobId}`);
@@ -128,7 +148,8 @@ export default function Home() {
               <p className="text-sm">{error}</p>
               {error.includes("OAuth client failure") && (
                 <p className="mt-2 text-xs opacity-80">
-                  Tip: Check your Google Cloud Credentials below. Google has recently disabled many default community client IDs.
+                  Tip: Check your Google Cloud Credentials below. Google has
+                  recently disabled many default community client IDs.
                 </p>
               )}
             </div>
@@ -139,7 +160,9 @@ export default function Home() {
         {step === 1 && (
           <div className="space-y-6">
             <div>
-              <label className="block text-sm font-medium mb-2">Spotify Playlist URL</label>
+              <label className="block text-sm font-medium mb-2">
+                Spotify Playlist URL
+              </label>
               <input
                 type="text"
                 placeholder="https://open.spotify.com/playlist/..."
@@ -150,12 +173,14 @@ export default function Home() {
             </div>
 
             <div className="border-t border-slate-800 pt-4">
-              <button 
+              <button
                 onClick={() => setShowAdvanced(!showAdvanced)}
                 className="flex items-center gap-2 text-slate-400 hover:text-slate-200 text-sm transition-colors mb-4"
               >
                 <Settings size={16} />
-                {showAdvanced ? "Hide Google Cloud Credentials" : "Show Google Cloud Credentials (Required)"}
+                {showAdvanced
+                  ? "Hide Google Cloud Credentials"
+                  : "Show Google Cloud Credentials (Required)"}
               </button>
 
               {showAdvanced && (
@@ -164,12 +189,18 @@ export default function Home() {
                     <Info className="shrink-0" size={20} />
                     <div>
                       <p className="font-semibold mb-1">Why do I need this?</p>
-                      <p className="opacity-80">Google has Tightened restrictions. You now need your own "TV and Limited Input Device" client ID from the Google Cloud Console.</p>
+                      <p className="opacity-80">
+                        Google has Tightened restrictions. You now need your own
+                        "TV and Limited Input Device" client ID from the Google
+                        Cloud Console.
+                      </p>
                     </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-medium text-slate-500 mb-1 uppercase tracking-wider">Client ID</label>
+                      <label className="block text-xs font-medium text-slate-500 mb-1 uppercase tracking-wider">
+                        Client ID
+                      </label>
                       <input
                         type="text"
                         placeholder="...apps.googleusercontent.com"
@@ -179,7 +210,9 @@ export default function Home() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-500 mb-1 uppercase tracking-wider">Client Secret</label>
+                      <label className="block text-xs font-medium text-slate-500 mb-1 uppercase tracking-wider">
+                        Client Secret
+                      </label>
                       <input
                         type="password"
                         placeholder="Your Client Secret"
@@ -198,7 +231,11 @@ export default function Home() {
               disabled={!spotifyUrl || !clientId || !clientSecret || loading}
               className="w-full bg-green-500 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold py-4 rounded-lg transition-colors flex items-center justify-center gap-2 text-lg"
             >
-              {loading ? <Loader2 className="animate-spin" /> : "Connect YouTube Music"}
+              {loading ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                "Connect YouTube Music"
+              )}
               <ArrowRight size={20} />
             </button>
           </div>
@@ -209,7 +246,9 @@ export default function Home() {
           <div className="text-center space-y-6">
             <h2 className="text-2xl font-semibold">Authenticate with Google</h2>
             <div className="bg-slate-950 p-6 rounded-xl border border-slate-800">
-              <p className="text-slate-400 mb-4">Visit the link below and enter the code:</p>
+              <p className="text-slate-400 mb-4">
+                Visit the link below and enter the code:
+              </p>
               <div className="text-4xl font-mono tracking-widest text-green-400 mb-6 bg-slate-900 p-4 rounded-lg border border-slate-700">
                 {authInfo.user_code}
               </div>
@@ -237,7 +276,8 @@ export default function Home() {
             </div>
             <h2 className="text-2xl font-semibold">Ready to Migrate!</h2>
             <p className="text-slate-400">
-              YouTube Music connected. Click below to start the migration of your Spotify playlist.
+              YouTube Music connected. Click below to start the migration of
+              your Spotify playlist.
             </p>
             <button
               onClick={startMigration}
@@ -253,31 +293,45 @@ export default function Home() {
         {step === 4 && jobStatus && (
           <div className="space-y-8">
             <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-semibold capitalize">{jobStatus.status.replace("_", " ")}...</h2>
-              <span className="text-green-500 font-mono text-xl">{Math.round(jobStatus.progress)}%</span>
+              <h2 className="text-2xl font-semibold capitalize">
+                {jobStatus.status.replace("_", " ")}...
+              </h2>
+              <span className="text-green-500 font-mono text-xl">
+                {Math.round(jobStatus.progress)}%
+              </span>
             </div>
-            
+
             <div className="w-full bg-slate-950 rounded-full h-4 overflow-hidden border border-slate-800">
-              <div 
-                className="bg-green-500 h-full transition-all duration-500" 
+              <div
+                className="bg-green-500 h-full transition-all duration-500"
                 style={{ width: `${jobStatus.progress}%` }}
               />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                <div className="text-slate-500 text-sm mb-1">Matched Tracks</div>
-                <div className="text-2xl font-bold text-green-400">{jobStatus.matched_count}</div>
+                <div className="text-slate-500 text-sm mb-1">
+                  Matched Tracks
+                </div>
+                <div className="text-2xl font-bold text-green-400">
+                  {jobStatus.matched_count}
+                </div>
               </div>
               <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                <div className="text-slate-500 text-sm mb-1">Missing Tracks</div>
-                <div className="text-2xl font-bold text-red-400">{jobStatus.missing_count}</div>
+                <div className="text-slate-500 text-sm mb-1">
+                  Missing Tracks
+                </div>
+                <div className="text-2xl font-bold text-red-400">
+                  {jobStatus.missing_count}
+                </div>
               </div>
             </div>
 
             <div className="bg-slate-950 rounded-xl p-4 border border-slate-800 max-h-60 overflow-y-auto font-mono text-xs text-slate-400">
               {jobStatus.logs.slice(-10).map((log: string, i: number) => (
-                <div key={i} className="mb-1">{log}</div>
+                <div key={i} className="mb-1">
+                  {log}
+                </div>
               ))}
             </div>
 
@@ -291,7 +345,7 @@ export default function Home() {
                 >
                   View Playlist on YT Music <ExternalLink size={20} />
                 </a>
-                <button 
+                <button
                   onClick={() => setStep(1)}
                   className="w-full mt-4 text-slate-400 hover:text-slate-200 transition-colors"
                 >
@@ -304,7 +358,15 @@ export default function Home() {
       </div>
 
       <footer className="mt-12 text-center text-slate-500 text-sm">
-        Built for Azure Free Tier. Playwright powered.
+        Made with <span className="text-red-500">♥</span> by{" "}
+        <a
+          href="https://abirdey.tech"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-green-400 hover:text-green-300 transition-colors"
+        >
+          Abir Dey
+        </a>
       </footer>
     </main>
   );
